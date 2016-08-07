@@ -395,7 +395,7 @@ public class Loggly {
         mThread.start();
     }
         
-    private static void log(JSONObject jsonObject) {
+    public static void log(JSONObject jsonObject) {
         if(!mThread.isAlive())
             start();
         
