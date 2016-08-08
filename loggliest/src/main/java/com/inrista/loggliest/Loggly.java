@@ -71,8 +71,7 @@ import retrofit.mime.TypedInput;
  * Log messages are formatted as json messages as expected by Loggly. Along with
  * the json field and value provided by calling one of the log functions, a "level"
  * field is appended with the current log level (verbose, debug, info, warning, error),
- * and a "timestamp" set according to when the message was logged. Also, a set of
- * various default fields can be appended, see {@link Builder#appendDefaultInfo(boolean)}
+ * and a "timestamp" set according to when the message was logged.
  * <p>
  * The log messages are saved in the internal app storage and uploaded to Loggly  
  * in bulk when either one of these conditions are fulfilled:
@@ -115,8 +114,6 @@ public class Loggly {
     private static final int UPLOAD_INTERVAL_LOG_COUNT_DEFAULT = 500;
     private static final int IDLE_SECS_MIN = 0;
     private static final int IDLE_SECS_DEFAULT = 1200;
-    private static final boolean APPEND_DEFAULT_INFO_DEFAULT = true;
-    private static final String UPDATE_STICKY_INFO_MSG = "update-sticky-info";
     private static final String THREAD_NAME = "loggliest";
 
     private static volatile Loggly mInstance;
@@ -128,8 +125,7 @@ public class Loggly {
     private static int mUploadIntervalSecs;
     private static int mUploadIntervalLogCount;
     private static int mIdleSecs;
-    private static boolean mAppendDefaultInfo;
-     
+
     private static IBulkLog mBulkLogService;
     private static Thread mThread = null;
     private static LinkedBlockingQueue<JSONObject> mLogQueue = new LinkedBlockingQueue<JSONObject>();
@@ -138,9 +134,6 @@ public class Loggly {
     private static int mLogCounter = 0;
     private static File mRecentLogFile;
     private static SimpleDateFormat mDateFormat;
-    private static String mAppVersionName = "";
-    private static int mAppVersionCode = 0;
-    private static HashMap<String, String> mStickyInfo = null;
     private static int mMaxSizeOnDisk = 0;
     
     /**
@@ -155,8 +148,6 @@ public class Loggly {
         private int uploadIntervalSecs = UPLOAD_INTERVAL_SECS_DEFAULT;
         private int uploadIntervalLogCount = UPLOAD_INTERVAL_LOG_COUNT_DEFAULT;
         private int idleSecs = IDLE_SECS_DEFAULT;
-        private boolean appendDefaultInfo = APPEND_DEFAULT_INFO_DEFAULT;
-        private HashMap<String, String> stickyInfo = new HashMap<String, String>();
         private int maxSizeOnDisk = MAX_SIZE_ON_DISK_DEFAULT;
         
         private Builder(Context context, String token) {
@@ -221,32 +212,6 @@ public class Loggly {
         }
         
         /**
-         * Set whether four default key-value pairs should be appended to each logged message:
-         * <ul>
-         * <li>"appversionname" - verisonName from the manifest</li>
-         * <li>"appversioncode" - versionCode from the manifest</li>
-         * <li>"devicemodel" - the android.os.Build.MODEL constant</li>
-         * <li>"androidversioncode" - the android.os.Build.VERSION.SDK_INT constant</li>
-         * </ul>
-         * @param append Set to true to append default info
-         */
-        public Builder appendDefaultInfo(boolean append) {
-            this.appendDefaultInfo = append;
-            return this;
-        }
-        
-        /**
-         * Append a key-value pair to each logged message. Chain multiple appendStickyInfo
-         * to append multiple key-value pairs.
-         * @param key The Loggly json field
-         * @param value The value
-         */
-        public Builder appendStickyInfo(String key, String value) {
-            this.stickyInfo.put(key, value);
-            return this;
-        }
-        
-        /**
          * Configure the buffer size for log messages that are not yet uploaded.
          * The oldest messages will be dropped if more info is logged than what 
          * fits in the buffer. 
@@ -285,7 +250,7 @@ public class Loggly {
                     if (mInstance == null) {
                         mInstance = new Loggly(context, token, logglyTag, logglyUrl, 
                                 uploadIntervalSecs, uploadIntervalLogCount, idleSecs, 
-                                appendDefaultInfo, stickyInfo, maxSizeOnDisk);
+                                maxSizeOnDisk);
                     }
                 }
             }
@@ -313,8 +278,7 @@ public class Loggly {
     }
     
     private Loggly(Context context, String token, String logglyTag, String logglyUrl, 
-            int uploadIntervalSecs, int uploadIntervalLogCount, int idleSecs, 
-            boolean appendDefaultInfo, HashMap<String, String> stickyInfo, int maxSizeOnDisk) {
+            int uploadIntervalSecs, int uploadIntervalLogCount, int idleSecs, int maxSizeOnDisk) {
         
         mContext = context;
         mToken = token;
@@ -322,19 +286,10 @@ public class Loggly {
         mUploadIntervalSecs = uploadIntervalSecs;
         mUploadIntervalLogCount = uploadIntervalLogCount;
         mIdleSecs = idleSecs;
-        mAppendDefaultInfo = appendDefaultInfo;
-        mStickyInfo = stickyInfo;
         mMaxSizeOnDisk = maxSizeOnDisk;
                 
         mRecentLogFile = recentLogFile();
         mDateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US);
-        
-        PackageManager manager = context.getPackageManager();
-        try {
-            PackageInfo info = manager.getPackageInfo(context.getPackageName(), 0);
-            mAppVersionName = info.versionName;
-            mAppVersionCode = info.versionCode;
-        } catch (NameNotFoundException e) {}
         
         RestAdapter restAdapter = new RestAdapter.Builder()
         .setEndpoint(logglyUrl)
@@ -521,22 +476,7 @@ public class Loggly {
             mThread.join();
         } catch (InterruptedException e) {}
     }
-    
-    /**
-     * Set or reset a key-value pair that is appended to each Loggly json log message.
-     * @param key The Loggly json field
-     * @param msg The message 
-     */
-    public static void setStickyInfo(String key, String msg) {
-        JSONObject json = new JSONObject();
-        try {
-            json.put(UPDATE_STICKY_INFO_MSG, true);
-            json.put("key", key);
-            json.put("msg", msg);
-            log(json);
-        } catch (JSONException e) {}
-    }
-    
+
     private static File recentLogFile() {
         File dir = mContext.getDir(LOG_FOLDER, Context.MODE_PRIVATE);
         File[] files = dir.listFiles();
@@ -606,29 +546,10 @@ public class Loggly {
             PrintStream ps = new PrintStream(new FileOutputStream(mRecentLogFile, true));            
             for(JSONObject msg : msgBatch) {
                 try {
-                    if(msg.has(UPDATE_STICKY_INFO_MSG)) {
-                        mStickyInfo.put(msg.getString("key"), msg.getString("msg"));
-                        continue;
-                    }
-                    
                     // Reformat timestamp to ISO-8601 as expected by Loggly
                     long timestamp = msg.getLong("timestamp");
                     msg.remove("timestamp");
                     msg.put("timestamp", mDateFormat.format(timestamp));
-                    
-                    // Append default info
-                    if(mAppendDefaultInfo) {
-                        msg.put("appversionname", mAppVersionName);
-                        msg.put("appversioncode", Integer.toString(mAppVersionCode));
-                        msg.put("devicemodel", android.os.Build.MODEL);
-                        msg.put("androidversioncode", Integer.toString(android.os.Build.VERSION.SDK_INT));
-                    }
-                    
-                    // Append sticky info
-                    if(!mStickyInfo.isEmpty()) {
-                        for(String key : mStickyInfo.keySet())
-                            msg.put(key, mStickyInfo.get(key));
-                    }
 
                 } catch (JSONException e) {}
                 
@@ -680,6 +601,7 @@ public class Loggly {
 
                 // Successful post
                 if (answer.getStatus() == 200) {
+                    Log.d("Loggly", "json: " + json);
                     logFile.delete();
                     mRecentLogFile = null;
                 }
